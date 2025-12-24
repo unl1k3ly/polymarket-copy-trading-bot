@@ -286,7 +286,7 @@ const postOrder = async (
             };
 
             Logger.info(
-                `Creating order: $${orderSize.toFixed(2)} @ $${minPriceAsk.price} (Balance: $${my_balance.toFixed(2)})`
+                `Creating order: $${orderSize.toFixed(2)} @ $${bestAskPrice} (Balance: $${my_balance.toFixed(2)})`
             );
             // Order args logged internally
             const signedOrder = await clobClient.createMarketOrder(order_arges);
