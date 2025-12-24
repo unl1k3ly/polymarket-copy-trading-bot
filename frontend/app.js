@@ -137,12 +137,22 @@ function renderStats() {
     const matchRate = calculateMatchRate();
     document.getElementById('matchRate').textContent = `${matchRate}%`;
 
-    // Bot total PnL - include ALL positions (open + closed)
-    // Closed positions (currentValue = 0) represent realized losses
-    const totalPnl = state.botPositions.reduce((sum, p) => sum + (p.cashPnl || 0), 0);
-    const pnlElement = document.getElementById('botTotalPnl');
-    pnlElement.textContent = formatCurrency(totalPnl);
-    pnlElement.className = `stat-value ${totalPnl >= 0 ? 'positive' : 'negative'}`;
+    // Totals
+    const botTotalPnl = state.botPositions.reduce((sum, p) => sum + (p.cashPnl || 0), 0);
+    const traderTotalPnl = state.traderPositions.reduce((sum, p) => sum + (p.cashPnl || 0), 0);
+    const botCapital = state.botPositions.reduce((sum, p) => sum + (p.currentValue || 0), 0);
+    const traderCapital = state.traderPositions.reduce((sum, p) => sum + (p.currentValue || 0), 0);
+
+    const botPnlEl = document.getElementById('botTotalPnl');
+    botPnlEl.textContent = formatCurrency(botTotalPnl);
+    botPnlEl.className = `stat-value ${botTotalPnl >= 0 ? 'positive' : 'negative'}`;
+
+    const traderPnlEl = document.getElementById('traderTotalPnl');
+    traderPnlEl.textContent = formatCurrency(traderTotalPnl);
+    traderPnlEl.className = `stat-value ${traderTotalPnl >= 0 ? 'positive' : 'negative'}`;
+
+    document.getElementById('botCapital').textContent = formatCurrency(botCapital);
+    document.getElementById('traderCapital').textContent = formatCurrency(traderCapital);
 }
 
 function renderPairedPositions() {
@@ -201,6 +211,10 @@ function renderPairedPositions() {
                 <span class="value ${avgSlippagePct > 0 ? 'negative' : avgSlippagePct < 0 ? 'positive' : ''}">${avgSlippagePct >= 0 ? '+' : ''}${avgSlippagePct.toFixed(2)}%</span>
             </div>
             <div class="paired-stat">
+                <span class="label">Price Drift $</span>
+                <span class="value">${matchedPairs.length ? `$${totalSlippage.toFixed(2)}` : '--'}</span>
+            </div>
+            <div class="paired-stat">
                 <span class="label">Trader Only</span>
                 <span class="value warning">${traderOnly.length}</span>
             </div>
@@ -249,14 +263,22 @@ function renderPairedPositions() {
                                 <td>
                                     <div class="paired-market">
                                         <img src="${t.icon}" alt="" onerror="this.style.display='none'">
-                                        <div class="paired-market-info">
-                                            <div class="paired-market-title" title="${t.title}">${t.title}</div>
-                                            <div class="paired-market-outcome">${t.outcome}</div>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td class="num-col">${formatPriceCents(t.avgPrice)}¢</td>
-                                <td class="num-col">${formatPriceCents(b.avgPrice)}¢</td>
+                                <div class="paired-market-info">
+                                    <div class="paired-market-title" title="${t.title}">${t.title}</div>
+                                    <div class="paired-market-outcome">${t.outcome}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="num-col">
+                            ${formatPriceCents(t.avgPrice)}¢
+                            <div class="sub-muted">Value: ${formatCurrency(t.currentValue || 0)}</div>
+                            <div class="sub-muted">PnL: ${formatCurrency(t.cashPnl || 0)}</div>
+                        </td>
+                        <td class="num-col">
+                            ${formatPriceCents(b.avgPrice)}¢
+                            <div class="sub-muted">Value: ${formatCurrency(b.currentValue || 0)}</div>
+                            <div class="sub-muted">PnL: ${formatCurrency(b.cashPnl || 0)}</div>
+                        </td>
                                 <td class="num-col">
                                     <span class="slippage-indicator ${spreadClass}">
                                         ${priceDiffCents >= 0 ? '+' : ''}${priceDiffCents}¢
@@ -384,8 +406,8 @@ function renderActivity(containerId, activities) {
                     <div class="activity-outcome">${activity.outcome}</div>
                 </div>
                 <div class="activity-amount">
-                    <div class="activity-size">${formatNumber(activity.size)}</div>
-                    <div class="activity-price">@ ${formatPriceCents(activity.price)}¢</div>
+                    <div class="activity-size">${formatNumber(activity.size)} @ ${formatPriceCents(activity.price)}¢</div>
+                    <div class="activity-price">Notional: ${formatCurrency((activity.size || 0) * (activity.price || 0))}</div>
                 </div>
                 <div class="activity-time">${formatRelativeTime(activity.timestamp)}</div>
             </div>
