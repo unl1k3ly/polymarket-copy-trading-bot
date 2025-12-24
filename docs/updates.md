@@ -19,3 +19,7 @@
 
 - Added a lightweight dashboard/API server (`npm run dashboard`) at `DASHBOARD_PORT` (default 4000). Serves `/api/positions` and `/api/activity` via Polymarket data API and hosts the frontend under `/`.
 - Frontend now consumes the local API (no external CORS proxy) and shows the tracked trader/bot addresses dynamically.
+
+## Reconciliation
+
+- New script `npm run reconcile` (`src/scripts/reconcilePositions.ts`): fetches trader/bot positions, finds stale bot-only holdings, and attempts to sell them using the existing postOrder logic (with slippage/wait guards). Use to clean up positions when the bot missed an exit.

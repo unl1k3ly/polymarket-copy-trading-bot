@@ -278,6 +278,15 @@ const postOrder = async (
             const maxOrderSize = bestAskSize * bestAskPrice;
             const orderSize = Math.min(remaining, maxOrderSize);
 
+            // Polymarket min price guard
+            if (bestAskPrice < 0.01) {
+                Logger.warning(
+                    `Best ask $${bestAskPrice} below Polymarket minimum (0.01). Skipping trade.`
+                );
+                await UserActivity.updateOne({ _id: trade._id }, { bot: true, myBoughtSize: totalBoughtTokens });
+                break;
+            }
+
             const order_arges = {
                 side: Side.BUY,
                 tokenID: trade.asset,
@@ -448,10 +457,18 @@ const postOrder = async (
             while (true) {
                 orderBook = await clobClient.getOrderBook(trade.asset);
                 if (!orderBook.bids || orderBook.bids.length === 0) {
-                    await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-                    Logger.warning('No bids available in order book');
-                    remaining = 0;
-                    break;
+                    if (SLIPPAGE_ACTION === 'skip' || slippageAttempts >= SLIPPAGE_MAX_RETRIES) {
+                        await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                        Logger.warning('No bids available in order book. Skipping trade.');
+                        remaining = 0;
+                        break;
+                    }
+                    slippageAttempts += 1;
+                    Logger.warning(
+                        `No bids available. Waiting ${SLIPPAGE_WAIT_MS}ms (attempt ${slippageAttempts}/${SLIPPAGE_MAX_RETRIES}).`
+                    );
+                    await sleep(SLIPPAGE_WAIT_MS);
+                    continue;
                 }
 
                 const maxPriceBid = orderBook.bids.reduce((max, bid) => {
@@ -507,6 +524,15 @@ const postOrder = async (
             if (sellAmount < MIN_ORDER_SIZE_TOKENS) {
                 Logger.info(
                     `Order amount (${sellAmount.toFixed(2)} tokens) below minimum - completing trade`
+                );
+                await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                break;
+            }
+
+            // Polymarket min price guard
+            if (bestBidPrice < 0.01) {
+                Logger.warning(
+                    `Best bid $${bestBidPrice} below Polymarket minimum (0.01). Skipping trade.`
                 );
                 await UserActivity.updateOne({ _id: trade._id }, { bot: true });
                 break;
