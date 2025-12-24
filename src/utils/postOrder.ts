@@ -11,10 +11,18 @@ const COPY_STRATEGY_CONFIG = ENV.COPY_STRATEGY_CONFIG;
 // Legacy parameters (for backward compatibility in SELL logic)
 const TRADE_MULTIPLIER = ENV.TRADE_MULTIPLIER;
 const COPY_PERCENTAGE = ENV.COPY_PERCENTAGE;
+// Slippage protection
+const MAX_SLIPPAGE_PCT = ENV.MAX_SLIPPAGE_PCT;
+const SLIPPAGE_WAIT_MS = ENV.SLIPPAGE_WAIT_MS;
+const SLIPPAGE_MAX_RETRIES = ENV.SLIPPAGE_MAX_RETRIES;
+const MIN_BOOK_SIZE_USD = ENV.MIN_BOOK_SIZE_USD;
+const SLIPPAGE_ACTION = ENV.SLIPPAGE_ACTION;
 
 // Polymarket minimum order sizes
 const MIN_ORDER_SIZE_USD = 1.0; // Minimum order size in USD for BUY orders
 const MIN_ORDER_SIZE_TOKENS = 1.0; // Minimum order size in tokens for SELL/MERGE orders
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const extractOrderError = (response: unknown): string | undefined => {
     if (!response) {
@@ -202,21 +210,56 @@ const postOrder = async (
         let totalBoughtTokens = 0; // Track total tokens bought for this trade
 
         while (remaining > 0 && retry < RETRY_LIMIT) {
-            const orderBook = await clobClient.getOrderBook(trade.asset);
-            if (!orderBook.asks || orderBook.asks.length === 0) {
-                Logger.warning('No asks available in order book');
-                await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-                break;
+            let orderBook;
+            let bestAskPrice = 0;
+            let bestAskSize = 0;
+            let slippageAttempts = 0;
+
+            while (true) {
+                orderBook = await clobClient.getOrderBook(trade.asset);
+                if (!orderBook.asks || orderBook.asks.length === 0) {
+                    Logger.warning('No asks available in order book');
+                    await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                    remaining = 0;
+                    break;
+                }
+
+                const minPriceAsk = orderBook.asks.reduce((min, ask) => {
+                    return parseFloat(ask.price) < parseFloat(min.price) ? ask : min;
+                }, orderBook.asks[0]);
+
+                bestAskPrice = parseFloat(minPriceAsk.price);
+                bestAskSize = parseFloat(minPriceAsk.size);
+                const bestAskValueUsd = bestAskPrice * bestAskSize;
+                const referencePrice = trade.price || bestAskPrice;
+                const maxAllowedPrice = referencePrice * (1 + MAX_SLIPPAGE_PCT / 100);
+                const priceOk = bestAskPrice <= maxAllowedPrice;
+                const depthOk = bestAskValueUsd >= MIN_BOOK_SIZE_USD;
+
+                Logger.info(`Best ask: ${minPriceAsk.size} @ $${minPriceAsk.price}`);
+
+                if (priceOk && depthOk) {
+                    break; // within tolerance
+                }
+
+                // Decide whether to wait or skip
+                if (SLIPPAGE_ACTION === 'skip' || slippageAttempts >= SLIPPAGE_MAX_RETRIES) {
+                    Logger.warning(
+                        `Price/depth outside tolerance (ask $${bestAskPrice.toFixed(4)} vs max $${maxAllowedPrice.toFixed(4)}, depth $${bestAskValueUsd.toFixed(2)}). Skipping trade.`
+                    );
+                    await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                    remaining = 0;
+                    break;
+                }
+
+                slippageAttempts += 1;
+                Logger.warning(
+                    `Price/depth outside tolerance (ask $${bestAskPrice.toFixed(4)} vs max $${maxAllowedPrice.toFixed(4)}, depth $${bestAskValueUsd.toFixed(2)}). Waiting ${SLIPPAGE_WAIT_MS}ms (attempt ${slippageAttempts}/${SLIPPAGE_MAX_RETRIES}).`
+                );
+                await sleep(SLIPPAGE_WAIT_MS);
             }
 
-            const minPriceAsk = orderBook.asks.reduce((min, ask) => {
-                return parseFloat(ask.price) < parseFloat(min.price) ? ask : min;
-            }, orderBook.asks[0]);
-
-            Logger.info(`Best ask: ${minPriceAsk.size} @ $${minPriceAsk.price}`);
-            if (parseFloat(minPriceAsk.price) - 0.05 > trade.price) {
-                Logger.warning('Price slippage too high - skipping trade');
-                await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+            if (remaining <= 0) {
                 break;
             }
 
@@ -232,14 +275,14 @@ const postOrder = async (
                 break;
             }
 
-            const maxOrderSize = parseFloat(minPriceAsk.size) * parseFloat(minPriceAsk.price);
+            const maxOrderSize = bestAskSize * bestAskPrice;
             const orderSize = Math.min(remaining, maxOrderSize);
 
             const order_arges = {
                 side: Side.BUY,
                 tokenID: trade.asset,
                 amount: orderSize,
-                price: parseFloat(minPriceAsk.price),
+                price: bestAskPrice,
             };
 
             Logger.info(
@@ -397,18 +440,57 @@ const postOrder = async (
         let totalSoldTokens = 0; // Track total tokens sold
 
         while (remaining > 0 && retry < RETRY_LIMIT) {
-            const orderBook = await clobClient.getOrderBook(trade.asset);
-            if (!orderBook.bids || orderBook.bids.length === 0) {
-                await UserActivity.updateOne({ _id: trade._id }, { bot: true });
-                Logger.warning('No bids available in order book');
-                break;
+            let orderBook;
+            let bestBidPrice = 0;
+            let bestBidSize = 0;
+            let slippageAttempts = 0;
+
+            while (true) {
+                orderBook = await clobClient.getOrderBook(trade.asset);
+                if (!orderBook.bids || orderBook.bids.length === 0) {
+                    await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                    Logger.warning('No bids available in order book');
+                    remaining = 0;
+                    break;
+                }
+
+                const maxPriceBid = orderBook.bids.reduce((max, bid) => {
+                    return parseFloat(bid.price) > parseFloat(max.price) ? bid : max;
+                }, orderBook.bids[0]);
+
+                bestBidPrice = parseFloat(maxPriceBid.price);
+                bestBidSize = parseFloat(maxPriceBid.size);
+                const bestBidValueUsd = bestBidPrice * bestBidSize;
+                const referencePrice = trade.price || bestBidPrice;
+                const minAllowedPrice = referencePrice * (1 - MAX_SLIPPAGE_PCT / 100);
+                const priceOk = bestBidPrice >= minAllowedPrice;
+                const depthOk = bestBidValueUsd >= MIN_BOOK_SIZE_USD;
+
+                Logger.info(`Best bid: ${maxPriceBid.size} @ $${maxPriceBid.price}`);
+
+                if (priceOk && depthOk) {
+                    break; // within tolerance
+                }
+
+                if (SLIPPAGE_ACTION === 'skip' || slippageAttempts >= SLIPPAGE_MAX_RETRIES) {
+                    Logger.warning(
+                        `Bid outside tolerance (bid $${bestBidPrice.toFixed(4)} vs min $${minAllowedPrice.toFixed(4)}, depth $${bestBidValueUsd.toFixed(2)}). Skipping trade.`
+                    );
+                    await UserActivity.updateOne({ _id: trade._id }, { bot: true });
+                    remaining = 0;
+                    break;
+                }
+
+                slippageAttempts += 1;
+                Logger.warning(
+                    `Bid outside tolerance (bid $${bestBidPrice.toFixed(4)} vs min $${minAllowedPrice.toFixed(4)}, depth $${bestBidValueUsd.toFixed(2)}). Waiting ${SLIPPAGE_WAIT_MS}ms (attempt ${slippageAttempts}/${SLIPPAGE_MAX_RETRIES}).`
+                );
+                await sleep(SLIPPAGE_WAIT_MS);
             }
 
-            const maxPriceBid = orderBook.bids.reduce((max, bid) => {
-                return parseFloat(bid.price) > parseFloat(max.price) ? bid : max;
-            }, orderBook.bids[0]);
-
-            Logger.info(`Best bid: ${maxPriceBid.size} @ $${maxPriceBid.price}`);
+            if (remaining <= 0) {
+                break;
+            }
 
             // Check if remaining amount is below minimum before creating order
             if (remaining < MIN_ORDER_SIZE_TOKENS) {
@@ -419,7 +501,7 @@ const postOrder = async (
                 break;
             }
 
-            const sellAmount = Math.min(remaining, parseFloat(maxPriceBid.size));
+            const sellAmount = Math.min(remaining, bestBidSize);
 
             // Final check: don't create orders below minimum
             if (sellAmount < MIN_ORDER_SIZE_TOKENS) {
@@ -434,7 +516,7 @@ const postOrder = async (
                 side: Side.SELL,
                 tokenID: trade.asset,
                 amount: sellAmount,
-                price: parseFloat(maxPriceBid.price),
+                price: bestBidPrice,
             };
             // Order args logged internally
             const signedOrder = await clobClient.createMarketOrder(order_arges);

@@ -114,6 +114,34 @@ const validateNumericConfig = (): void => {
             `Invalid NETWORK_RETRY_LIMIT: ${process.env.NETWORK_RETRY_LIMIT}. Must be between 1 and 10.`
         );
     }
+
+    const maxSlippagePct = parseFloat(process.env.MAX_SLIPPAGE_PCT || '1.0');
+    if (isNaN(maxSlippagePct) || maxSlippagePct < 0 || maxSlippagePct > 100) {
+        throw new Error(
+            `Invalid MAX_SLIPPAGE_PCT: ${process.env.MAX_SLIPPAGE_PCT}. Must be between 0 and 100.`
+        );
+    }
+
+    const slippageWaitMs = parseInt(process.env.SLIPPAGE_WAIT_MS || '30000', 10);
+    if (isNaN(slippageWaitMs) || slippageWaitMs < 0) {
+        throw new Error(
+            `Invalid SLIPPAGE_WAIT_MS: ${process.env.SLIPPAGE_WAIT_MS}. Must be a non-negative integer (ms).`
+        );
+    }
+
+    const slippageMaxRetries = parseInt(process.env.SLIPPAGE_MAX_RETRIES || '20', 10);
+    if (isNaN(slippageMaxRetries) || slippageMaxRetries < 0 || slippageMaxRetries > 20) {
+        throw new Error(
+            `Invalid SLIPPAGE_MAX_RETRIES: ${process.env.SLIPPAGE_MAX_RETRIES}. Must be between 0 and 20.`
+        );
+    }
+
+    const minBookSizeUsd = parseFloat(process.env.MIN_BOOK_SIZE_USD || '5.0');
+    if (isNaN(minBookSizeUsd) || minBookSizeUsd < 0) {
+        throw new Error(
+            `Invalid MIN_BOOK_SIZE_USD: ${process.env.MIN_BOOK_SIZE_USD}. Must be a non-negative number.`
+        );
+    }
 };
 
 /**
@@ -345,6 +373,12 @@ export const ENV = {
         process.env.TRADE_AGGREGATION_WINDOW_SECONDS || '300',
         10
     ), // 5 minutes default
+    // Slippage protection
+    MAX_SLIPPAGE_PCT: parseFloat(process.env.MAX_SLIPPAGE_PCT || '1.0'),
+    SLIPPAGE_WAIT_MS: parseInt(process.env.SLIPPAGE_WAIT_MS || '30000', 10),
+    SLIPPAGE_MAX_RETRIES: parseInt(process.env.SLIPPAGE_MAX_RETRIES || '20', 10),
+    MIN_BOOK_SIZE_USD: parseFloat(process.env.MIN_BOOK_SIZE_USD || '5.0'),
+    SLIPPAGE_ACTION: (process.env.SLIPPAGE_ACTION || 'wait').toLowerCase() === 'skip' ? 'skip' : 'wait',
     MONGO_URI: process.env.MONGO_URI as string,
     RPC_URL: process.env.RPC_URL as string,
     USDC_CONTRACT_ADDRESS: process.env.USDC_CONTRACT_ADDRESS as string,
