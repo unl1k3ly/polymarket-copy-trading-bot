@@ -86,14 +86,16 @@ async function loadAllData() {
     refreshBtn.classList.add('spinning');
 
     try {
-        const [positionsPayload, activityPayload] = await Promise.all([
+        const [configPayload, positionsPayload, activityPayload] = await Promise.all([
+            fetchJson('/api/config'),
             fetchJson(`/api/positions?limit=${CONFIG.POSITIONS_LIMIT}`),
             fetchJson(`/api/activity?limit=${CONFIG.ACTIVITY_LIMIT}`),
         ]);
 
+        const configTrader = Array.isArray(configPayload?.traders) ? configPayload.traders[0] : undefined;
         const primaryTrader = positionsPayload.traders?.[0];
-        state.traderAddress = primaryTrader?.address || CONFIG.TRADER_ADDRESS;
-        state.botAddress = positionsPayload.bot?.address || CONFIG.BOT_ADDRESS;
+        state.traderAddress = primaryTrader?.address || configTrader || CONFIG.TRADER_ADDRESS;
+        state.botAddress = positionsPayload.bot?.address || configPayload?.proxyWallet || CONFIG.BOT_ADDRESS;
 
         state.traderPositions = primaryTrader?.positions || [];
         state.botPositions = positionsPayload.bot?.positions || [];
