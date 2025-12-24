@@ -293,7 +293,7 @@ function renderPairedPositions() {
                                 </td>
                                 <td class="num-col">
                                     <span class="${pnlDiff >= 0 ? 'positive' : 'negative'}">
-                                        ${pnlDiff >= 0 ? '+' : ''}${formatCurrency(pnlDiff)}
+                                        ${formatCurrencySigned(pnlDiff)}
                                     </span>
                                 </td>
                             </tr>
@@ -762,6 +762,16 @@ function formatPrice(value) {
 function formatPriceCents(value) {
     if (typeof value !== 'number') return '0';
     return Math.round(value * 100);
+}
+
+function formatCurrencySigned(value) {
+    if (typeof value !== 'number') return '$0.00';
+    const sign = value > 0 ? '+' : value < 0 ? '-' : '';
+    const absValue = Math.abs(value);
+    if (absValue >= 1000) {
+        return `${sign}$${(absValue / 1000).toFixed(1)}k`;
+    }
+    return `${sign}$${absValue.toFixed(2)}`;
 }
 
 function formatVolume(value) {
